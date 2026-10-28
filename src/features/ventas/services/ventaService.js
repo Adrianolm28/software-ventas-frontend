@@ -16,7 +16,7 @@ export const ventaService = {
     return response.data;
   },
 
-  eliminarVenta: async (id) => {
-    await api.delete(`/api/ventas/${id}`);
+  cancelarVenta: async (id) => {
+    await api.put(`/api/ventas/${id}/cancelar`);
   },
 };

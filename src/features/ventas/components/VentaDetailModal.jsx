@@ -71,6 +71,20 @@ export function VentaDetailModal({ isOpen, onClose, venta }) {
               <p className="text-slate-400 text-xs mb-1">Método de Pago</p>
               <div>{renderMetodoBadge(venta.metodoPago)}</div>
             </div>
+            
+            <div>
+              <p className="text-slate-400 text-xs mb-1">Estado de la venta</p>
+            
+              <span
+                className={`inline-block px-2.5 py-1 rounded-full text-xs font-semibold ${
+                  venta.estado === "CANCELADO"
+                    ? "bg-red-100 text-red-700"
+                    : "bg-emerald-100 text-emerald-700"
+                }`}
+              >
+                {venta.estado || "COMPLETADO"}
+              </span>
+            </div>
           </div>
 
           {/* Tabla de Productos */}

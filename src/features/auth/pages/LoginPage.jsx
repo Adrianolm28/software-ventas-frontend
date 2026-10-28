@@ -55,7 +55,7 @@ export const LoginPage = () => {
             Gestión inteligente para tu negocio
           </h1>
           <p className="text-sky-100 text-base leading-relaxed">
-            Controla ventas, productos, clientes y usuarios desde una plataforma rápida, intuitiva y moderna.
+            Registra ventas y consulta productos y clientes desde un punto de venta rápido, intuitivo y moderno.
           </p>
         </div>
 

@@ -25,19 +25,46 @@ export function App() {
             }
           >
             <Route index element={<Navigate to="/ventas" replace />} />
+
             <Route path="ventas" element={<VentasPage />} />
-            <Route path="productos" element={<ProductosPage />} />
-            <Route path="categorias" element={<CategoriasPage />} />
-            <Route path="clientes" element={<ClientesPage />} />
+
+            <Route
+              path="productos"
+              element={
+                <ProtectedRoute allowedRoles={['ADMIN']}>
+                  <ProductosPage />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="categorias"
+              element={
+                <ProtectedRoute allowedRoles={['ADMIN']}>
+                  <CategoriasPage />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="clientes"
+              element={
+                <ProtectedRoute allowedRoles={['ADMIN']}>
+                  <ClientesPage />
+                </ProtectedRoute>
+              }
+            />
 
             <Route
               path="usuarios"
               element={
-                <ProtectedRoute allowedRoles={['ADMIN', 'ADMINISTRADOR']}>
+                <ProtectedRoute allowedRoles={['ADMIN']}>
                   <UsuariosPage />
                 </ProtectedRoute>
               }
             />
+
+            <Route path="*" element={<Navigate to="/ventas" replace />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

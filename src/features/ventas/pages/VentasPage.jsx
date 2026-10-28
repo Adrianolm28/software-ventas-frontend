@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import Swal from "sweetalert2";
 import {
   ShoppingCart,
   Search,
@@ -18,18 +19,18 @@ import {
   ChevronRight,
   PackageCheck,
   Check,
+  XCircle,
   UserPlus
 } from "lucide-react";
 import api from "../../../api/axiosClient";
-import { ventaService } from "../services/ventaService";
 import { useAuth } from "../../../context/AuthContext";
+import { ventaService } from "../services/ventaService";
 import {
   showSuccessAlert,
   showErrorAlert,
-  showConfirmDialog,
 } from "../../../utils/alerts";
 import { VentaDetailModal } from "../components/VentaDetailModal";
-import { NuevoClienteModal } from "../components/NuevoClienteModal"; // <-- NUEVO MODAL
+import { NuevoClienteModal } from "../components/NuevoClienteModal"; 
 
 const moneda = new Intl.NumberFormat("es-PE", {
   style: "currency",
@@ -45,7 +46,7 @@ const METODOS_PAGO = [
 
 export const VentasPage = () => {
   const { hasRole } = useAuth();
-  const puedeEliminar = hasRole("ADMIN");
+  const puedeCancelar = hasRole("ADMIN");
 
   const [activeTab, setActiveTab] = useState("pos");
 
@@ -117,36 +118,136 @@ export const VentasPage = () => {
     }
   };
 
+  const handleCancelarVenta = async (venta) => {
+  if ((venta.estado || "COMPLETADO") === "CANCELADO") {
+    showErrorAlert("Venta cancelada", "Esta venta ya está cancelada.");
+    return;
+  }
+
+  const resultado = await Swal.fire({
+  title: "¿Cancelar esta venta?",
+  text: `La venta ${venta.idVenta} será marcada como CANCELADO y se devolverá el stock al inventario.`,
+  icon: "warning",
+  showCancelButton: true,
+  confirmButtonText: "Sí, cancelar venta",
+  cancelButtonText: "No, volver",
+  reverseButtons: true,
+  focusCancel: true,
+  buttonsStyling: false,
+  customClass: {
+    popup: "rounded-2xl",
+    title: "text-slate-800",
+    htmlContainer: "text-slate-500",
+    confirmButton:
+      "bg-red-600 hover:bg-red-700 text-white px-4 py-2.5 rounded-xl font-semibold mx-1 transition-colors",
+    cancelButton:
+      "bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2.5 rounded-xl font-semibold mx-1 transition-colors",
+  },
+});
+
+if (!resultado.isConfirmed) return;
+
+  try {
+    await ventaService.cancelarVenta(venta.idVenta);
+
+    setSelectedVentaDetail((actual) =>
+      actual?.idVenta === venta.idVenta
+        ? { ...actual, estado: "CANCELADO" }
+        : actual
+    );
+
+    showSuccessAlert(
+      "Venta cancelada",
+      "La venta se canceló correctamente y el stock fue devuelto."
+    );
+
+    await Promise.all([
+      cargarVentas(),
+      cargarCatalogosPOS()
+    ]);
+  } catch (error) {
+    showErrorAlert(
+      "Error al cancelar",
+      error.response?.data?.message ||
+        "No se pudo cancelar la venta."
+    );
+  }
+};
+
   const addToCart = (producto) => {
+    if (producto.estado === false) {
+      showErrorAlert("Producto inactivo", "Este producto no está disponible para la venta.");
+      return;
+    }
+  
+    const stock = Number(producto.stock ?? 0);
+    const existente = cart.find(
+      (item) => item.idProducto === producto.idProducto
+    );
+    const cantidadActual = existente?.cantidad ?? 0;
+  
+    if (stock <= cantidadActual) {
+      showErrorAlert(
+        "Stock insuficiente",
+        stock <= 0
+          ? "Este producto no tiene existencias."
+          : `Solo hay ${stock} unidades disponibles.`
+      );
+      return;
+    }
+  
     setCart((prevCart) => {
-      const existing = prevCart.find((item) => item.idProducto === producto.idProducto);
-      if (existing) {
+      const item = prevCart.find(
+        (item) => item.idProducto === producto.idProducto
+      );
+  
+      if (item) {
         return prevCart.map((item) =>
           item.idProducto === producto.idProducto
             ? { ...item, cantidad: item.cantidad + 1 }
             : item
         );
       }
+  
       return [
         ...prevCart,
         {
           idProducto: producto.idProducto,
           nombre: producto.nombre,
+          marca: producto.marca,
           precio: producto.precio,
           cantidad: 1,
+          stock,
         },
       ];
     });
   };
 
   const updateQuantity = (idProducto, delta) => {
+    const producto = cart.find(
+      (item) => item.idProducto === idProducto
+    );
+  
+    if (!producto) return;
+  
+    const nuevaCantidad = producto.cantidad + delta;
+  
+    if (delta > 0 && nuevaCantidad > producto.stock) {
+      showErrorAlert(
+        "Stock insuficiente",
+        `Solo hay ${producto.stock} unidades disponibles de ${producto.nombre}.`
+      );
+      return;
+    }
+  
     setCart((prevCart) =>
       prevCart
         .map((item) => {
           if (item.idProducto === idProducto) {
-            const newQty = item.cantidad + delta;
-            return newQty > 0 ? { ...item, cantidad: newQty } : null;
+            const cantidad = item.cantidad + delta;
+            return cantidad > 0 ? { ...item, cantidad } : null;
           }
+  
           return item;
         })
         .filter(Boolean)
@@ -186,7 +287,7 @@ export const VentasPage = () => {
       clearCart();
       setSelectedCliente("CLIENTE_FRECUENTE");
       setMetodoPago("EFECTIVO");
-      if (activeTab === "history") cargarVentas();
+      await cargarCatalogosPOS();
     } catch (error) {
       showErrorAlert(
         "Error al procesar la venta",
@@ -197,24 +298,20 @@ export const VentasPage = () => {
     }
   };
 
-  const handleEliminarVenta = async (id) => {
-    const result = await showConfirmDialog("¿Eliminar venta?", "Esta acción no se puede deshacer");
-    if (result.isConfirmed) {
-      try {
-        await ventaService.eliminarVenta(id);
-        showSuccessAlert("Venta eliminada", "El registro se eliminó correctamente");
-        cargarVentas();
-      } catch {
-        showErrorAlert("Acceso denegado", "No tienes permisos para eliminar esta venta");
-      }
-    }
-  };
+  
 
-  const filteredProductos = productos.filter(
-    (p) =>
-      p.nombre?.toLowerCase().includes(searchProduct.toLowerCase()) ||
-      p.idProducto?.toLowerCase().includes(searchProduct.toLowerCase())
-  );
+  const filteredProductos = productos.filter((p) => {
+    const busqueda = searchProduct.toLowerCase();
+  
+    return (
+      p.estado !== false &&
+      (
+        p.nombre?.toLowerCase().includes(busqueda) ||
+        p.idProducto?.toLowerCase().includes(busqueda) ||
+        p.marca?.toLowerCase().includes(busqueda)
+      )
+    );
+  });
 
   return (
     <div className="p-6 max-w-[1600px] mx-auto space-y-6">
@@ -293,34 +390,73 @@ export const VentasPage = () => {
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4 max-h-[600px] overflow-y-auto pr-1">
-                {filteredProductos.map((prod) => (
-                  <div
-                    key={prod.idProducto}
-                    onClick={() => addToCart(prod)}
-                    className="group relative bg-slate-50 hover:bg-indigo-50/50 border border-slate-200/80 hover:border-indigo-300 rounded-xl p-4 transition-all cursor-pointer flex flex-col justify-between shadow-xs hover:shadow-md"
-                  >
-                    <div>
-                      <span className="inline-block text-[10px] font-mono bg-slate-200 group-hover:bg-indigo-100 text-slate-600 group-hover:text-indigo-700 px-1.5 py-0.5 rounded mb-2">
-                        {prod.idProducto}
-                      </span>
-                      <h3 className="font-semibold text-slate-800 group-hover:text-indigo-900 text-sm line-clamp-2">
-                        {prod.nombre}
-                      </h3>
-                    </div>
-
-                    <div className="mt-4 flex justify-between items-end pt-2 border-t border-slate-200/50">
+                {filteredProductos.map((prod) => {
+                  const stock = Number(prod.stock ?? 0);
+                  const cantidadEnCarrito =
+                    cart.find((item) => item.idProducto === prod.idProducto)?.cantidad ?? 0;
+                  const disponibles = Math.max(stock - cantidadEnCarrito, 0);
+                  const noDisponible = prod.estado === false || disponibles === 0;
+              
+                  return (
+                    <div
+                      key={prod.idProducto}
+                      onClick={() => addToCart(prod)}
+                      className={`group relative bg-slate-50 hover:bg-indigo-50/50 border border-slate-200/80 hover:border-indigo-300 rounded-xl p-4 transition-all flex flex-col justify-between shadow-xs hover:shadow-md ${
+                        noDisponible
+                          ? "cursor-not-allowed opacity-60"
+                          : "cursor-pointer"
+                      }`}
+                    >
                       <div>
-                        <span className="text-[10px] text-slate-400 block">Precio</span>
-                        <span className="font-bold text-indigo-600 text-base">
-                          {moneda.format(prod.precio)}
+                        <span className="inline-block text-[10px] font-mono bg-slate-200 group-hover:bg-indigo-100 text-slate-600 group-hover:text-indigo-700 px-1.5 py-0.5 rounded mb-2">
+                          {prod.idProducto}
+                        </span>
+              
+                        <h3 className="font-semibold text-slate-800 group-hover:text-indigo-900 text-sm line-clamp-2">
+                          {prod.nombre}
+                        </h3>
+              
+                        <p className="mt-1 text-xs text-slate-500">
+                          {prod.marca || "Sin marca"}
+                        </p>
+              
+                        <span
+                          className={`inline-block mt-2 text-[10px] font-semibold px-2 py-1 rounded ${
+                            disponibles > 0 && prod.estado !== false
+                              ? "bg-emerald-50 text-emerald-700"
+                              : "bg-red-50 text-red-600"
+                          }`}
+                        >
+                          {prod.estado === false
+                            ? "Producto inactivo"
+                            : disponibles > 0
+                              ? `Disponibles: ${disponibles}`
+                              : "Sin unidades disponibles"}
                         </span>
                       </div>
-                      <button className="bg-indigo-600 group-hover:bg-indigo-700 text-white p-2 rounded-lg transition-transform active:scale-95 shadow-sm">
-                        <Plus className="w-4 h-4" />
-                      </button>
+              
+                      <div className="mt-4 flex justify-between items-end pt-2 border-t border-slate-200/50">
+                        <div>
+                          <span className="text-[10px] text-slate-400 block">
+                            Precio
+                          </span>
+              
+                          <span className="font-bold text-indigo-600 text-base">
+                            {moneda.format(prod.precio)}
+                          </span>
+                        </div>
+              
+                        <button
+                          type="button"
+                          disabled={noDisponible}
+                          className="bg-indigo-600 group-hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white p-2 rounded-lg transition-transform active:scale-95 shadow-sm"
+                        >
+                          <Plus className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -527,6 +663,7 @@ export const VentasPage = () => {
                     <th className="p-4">Método Pago</th>
                     <th className="p-4">Fecha / Hora</th>
                     <th className="p-4 text-right">Total</th>
+                    <th className="p-4 text-center">Estado</th>
                     <th className="p-4 text-center">Acciones</th>
                   </tr>
                 </thead>
@@ -555,6 +692,18 @@ export const VentasPage = () => {
                         <td className="p-4 text-right font-bold text-slate-800">
                           {moneda.format(venta.total || 0)}
                         </td>
+                        <td className="p-4 text-center">
+                          <span
+                            className={`inline-block px-2.5 py-1 rounded-full text-xs font-semibold ${
+                              (venta.estado || "COMPLETADO") === "CANCELADO"
+                                ? "bg-red-100 text-red-700"
+                                : "bg-emerald-100 text-emerald-700"
+                            }`}
+                          >
+                            {venta.estado || "COMPLETADO"}
+                          </span>
+                        </td>
+
                         <td className="p-4">
                           <div className="flex justify-center gap-1">
                             <button
@@ -564,22 +713,26 @@ export const VentasPage = () => {
                             >
                               <Eye className="w-4 h-4" />
                             </button>
-                            {puedeEliminar && (
-                              <button
-                                onClick={() => handleEliminarVenta(venta.idVenta)}
-                                className="p-2 text-slate-500 hover:text-red-600 rounded-lg hover:bg-red-50 transition-colors"
-                                title="Eliminar Venta"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
+                        
+                            {puedeCancelar &&
+                              (venta.estado || "COMPLETADO") !== "CANCELADO" && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleCancelarVenta(venta)}
+                                  className="p-2 text-red-500 hover:text-red-700 rounded-lg hover:bg-red-50 transition-colors"
+                                  title="Cancelar venta"
+                                >
+                                  <XCircle className="w-4 h-4" />
+                                </button>
+                              )}
                           </div>
                         </td>
+
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan="6" className="p-12 text-center text-slate-400">
+                      <td colSpan="7" className="p-12 text-center text-slate-400">
                         No se encontraron registros de ventas.
                       </td>
                     </tr>
